@@ -17,7 +17,7 @@ This repo must ALWAYS use the **Parvpaigwar** GitHub account (`parvpaigwar@gmail
 Internal ChatGPT-style chatbot for the Doott sales team: paste a lead request (often from WhatsApp) → bot pulls matching records from Doott's Neon Postgres (`final.people` ~45M rows, `final.companies` ~1.6M rows), **checks the data really fits the request**, shows a 10-row sample + total, asks how many, then gives a CSV.
 Sibling repos: `Leader-Backend` (Doott app, owns the Neon data) and `ETL_Scraper` (fills the data). This repo is **read-only** towards Neon.
 
-Stack: Next.js 16 (App Router, TypeScript) — UI + API routes in one app, deployed on Vercel. LangGraph.js for the agent, OpenRouter (OpenAI-compatible) via `@langchain/openai`, `pg` for Neon, `@libsql/client` (SQLite) for conversations.
+Stack: Next.js 16 (App Router, TypeScript) — UI + API routes in one app, deployed on Vercel. LangGraph.js for the agent, Google Gemini API (OpenAI-compatible endpoint) via `@langchain/openai`, `pg` for Neon, `@libsql/client` (SQLite) for conversations.
 
 ## Layout
 - `prompts/system_prompt.md` — **the DB knowledge prompt** (schema, indexes, real spelling lists for cities/states/industries, title synonyms, fast SQL patterns, GCC domain list, reply format). Loaded at runtime by every LLM step. Most quality fixes go here.
@@ -53,12 +53,12 @@ START → route ─┬─ count answer ("100"/"all"/"yes") ─► deliver → EN
 - `+91-80-xxxx-xxxx` style numbers are landlines (→ `other_phone`), not mobiles.
 
 ## Running
-- Local: `npm install`, then `npm run dev` → http://localhost:3100. Next reads `.env` (needs `NEON_DATABASE_URL`, `OPENROUTER_API_KEY`). SQLite file = `data/chat.db`. No `APP_PASSWORD` locally = open.
-- Cheap testing: `LLM_MODEL_FAST=openai/gpt-4o-mini LLM_MODEL_SMART=openai/gpt-4.1-mini LLM_MAX_TOKENS=1200 npm run dev` (cheap models break SQL rules more often; the guard + retry loop covers it).
+- Local: `npm install`, then `npm run dev` → http://localhost:3100. Next reads `.env` (needs `NEON_DATABASE_URL`, `GEMINI_API_KEY`). SQLite file = `data/chat.db`. No `APP_PASSWORD` locally = open.
+- Cheap testing: `LLM_MODEL_FAST=gemini-flash-lite-latest LLM_MODEL_SMART=gemini-flash-lite-latest LLM_MAX_TOKENS=1200 npm run dev` (cheap models break SQL rules more often; the guard + retry loop covers it).
 - Checks: `npm run typecheck`, `npm run build`. No test suite — verify by chatting (UI or `curl -N POST /api/conversations/<id>/chat`).
 
 ## Deploy (Vercel)
-- Import repo as a Next.js project. Env vars: `NEON_DATABASE_URL`, `OPENROUTER_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_PASSWORD`, `AUTH_SECRET`, optional `LLM_MODEL_FAST`, `LLM_MODEL_SMART`, `LLM_MAX_TOKENS`, `AGENT_MAX_ATTEMPTS`, `AGENT_RECURSION_LIMIT`.
+- Import repo as a Next.js project. Env vars: `NEON_DATABASE_URL`, `GEMINI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_PASSWORD`, `AUTH_SECRET`, optional `LLM_MODEL_FAST`, `LLM_MODEL_SMART`, `LLM_MAX_TOKENS`, `AGENT_MAX_ATTEMPTS`, `AGENT_RECURSION_LIMIT`.
 - Vercel's filesystem is not persistent → use Turso (hosted SQLite/libSQL) for conversations. Without it the app falls back to `/tmp/chat.db` and loses history.
 - Chat route has `maxDuration = 300` (needs Fluid compute). A turn takes ~20–60s.
 - Production without `APP_PASSWORD` is locked (all API → 401). This app exposes contact data — never deploy it open.

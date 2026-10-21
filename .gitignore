@@ -2,7 +2,7 @@ node_modules/
 .next/
 out/
 .vercel/
-data/
+/data/
 *.db
 *.db-journal
 .env

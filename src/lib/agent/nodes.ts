@@ -3,7 +3,7 @@ import { llmJson } from "../llm";
 import { systemPrompt } from "../prompt";
 import { readOnlyQuery } from "../db/neon";
 import { staticCheck, withLimit, planCheck } from "../data/sqlGuard";
-import { processRows, unknownCorporateDomains, columnsFor } from "../data/postprocess";
+import { processRows, unknownCorporateDomains, columnsFor, lookupEmailStates } from "../data/postprocess";
 import type { GccInfo } from "../data/gcc";
 import { saveResultSet } from "../repo";
 import { SpecSchema, type GState, type Row, type Spec, type Validation, type SavedState, type Reply } from "./state";
@@ -147,7 +147,8 @@ YOUR JOB IN THIS STEP: write ONE PostgreSQL SELECT for Neon that returns candida
 - Follow §4 (normalization) and §5 (SQL patterns) exactly. Expand cities/states/titles/industries into real DB values.
 - Return these columns (exact names/aliases): ${REQUIRED_COLUMNS[spec.entity]}
 - Do NOT add LIMIT, ORDER BY or a trailing ';' — the system wraps your query with its own LIMIT.
-- Put the valid-mobile EXISTS check (§5.3) in SQL when "mobile" is a must-have, and the has-email check when "email" is.
+- Put the valid-mobile EXISTS check (§5.3) in SQL when "mobile" is a must-have, and the has-email check when "email" or "verified_email" is.
+- "verified_email" is checked by the app after the query (against final.email_verifications) — in SQL only require that an email exists; do NOT join email_verifications.
 - GCC and company size are NOT columns — do not try to filter them in SQL (they are tagged after the query).
 - On people: the query MUST use an indexed filter (job_title ILIKE trigram, city IN exact list, state IN exact list). Never ILIKE on people.city/state/location.`;
 
@@ -182,7 +183,8 @@ Return JSON: {"sql": "...", "notes": "one line on what you changed"}`;
 // execute — guard (static + EXPLAIN) then run read-only with a LIMIT; also a capped total count.
 // ---------------------------------------------------------------------------------------------
 function fetchLimit(spec: Spec, requested: number | "all" | null): number {
-  const gccBoost = spec.company_type ? 2 : 1;
+  // GCC-only and verified-email filters drop most rows after the query, so fetch more.
+  const gccBoost = (spec.company_type ? 2 : 1) * (spec.must_have.includes("verified_email") ? 2 : 1);
   if (requested === "all") return HARD_ROW_CAP;
   if (typeof requested === "number") return Math.min(HARD_ROW_CAP, Math.max(1500, requested * 3 * gccBoost));
   return Math.min(HARD_ROW_CAP, 1500 * gccBoost);
@@ -274,7 +276,18 @@ export async function enrich(s: GState): Promise<Partial<GState>> {
       console.warn("[enrich] GCC classification failed:", err);
     }
   }
-  const processed = processRows(s.rows, spec, cache);
+  const emailStates = s.rows.length ? await lookupEmailStates(s.rows).catch((err) => (console.warn("[enrich] email lookup failed:", err), {})) : {};
+  const processed = processRows(s.rows, spec, cache, emailStates);
+  // No verified emails exist for this segment: don't burn retries on SQL — show unverified ones and say so.
+  if (!processed.length && spec.must_have.includes("verified_email")) {
+    const relaxedSpec = { ...spec, summary: spec.summary.replace(/\b(verified|valid|deliverable)\s+(?=emails?)/i, ""), must_have: spec.must_have.map((m) => (m === "verified_email" ? "email" : m)) as Spec["must_have"] };
+    const relaxed = processRows(s.rows, relaxedSpec, cache, emailStates);
+    if (relaxed.length) {
+      const checked = Object.keys(emailStates).length;
+      const emailNote = `⚠️ None of these emails are verified yet (${checked ? `${checked} were checked, none deliverable` : "none of them are in our verification table"}). Showing unverified emails instead.`;
+      return { rows: relaxed, spec: relaxedSpec, emailNote, saved: { ...s.saved, gccCache: cache } };
+    }
+  }
   return { rows: processed, saved: { ...s.saved, gccCache: cache } };
 }
 
@@ -377,7 +390,9 @@ export async function presentSample(s: GState): Promise<Partial<GState>> {
   if (spec.company_type) notes.push("GCC is detected from email/website domains (no GCC column in DB)");
   if (spec.company_size.length) notes.push("company size is not in the DB — not filtered");
   if (spec.must_have.includes("mobile")) notes.push("mobile = valid Indian mobile format, not live-checked");
+  if (spec.must_have.includes("verified_email")) notes.push("verified email = passed the SMTP check in our email_verifications table");
   if (notes.length) lines.push(`Note: ${notes.join("; ")}.`);
+  if (s.emailNote) lines.push(s.emailNote);
   if (!passed) {
     lines.push(`⚠️ Quality check after ${s.attempts.length} attempt(s): ${b.validation.issues.join("; ") || "partial match"}.`);
     if (b.validation.question) lines.push(b.validation.question);
@@ -432,7 +447,8 @@ export async function deliver(s: GState): Promise<Partial<GState>> {
     if (spec.company_type || spec.entity === "people") {
       cache = await classifyUnknownDomains(unknownCorporateDomains(res.rows, spec, cache), cache).catch(() => cache);
     }
-    rows = processRows(res.rows, spec, cache).slice(0, want);
+    const emailStates = await lookupEmailStates(res.rows).catch(() => ({}));
+    rows = processRows(res.rows, spec, cache, emailStates).slice(0, want);
   } catch (err) {
     return {
       reply: { text: `Export failed: ${String((err as Error).message).slice(0, 300)}. Try a smaller number or refine the request.`, stage: "awaiting_count" },

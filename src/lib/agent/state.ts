@@ -100,6 +100,9 @@ export const GraphState = Annotation.Root({
   best: last<{ sql: string; rows: Row[]; fetched: number; hitCap: boolean; rawTotal: number | null; score: number; validation: Validation } | null>(() => null),
   attempts: last<Attempt[]>(() => []),
 
+  // Set when the verified-email filter removed every row and we fell back to unverified emails.
+  emailNote: last<string | null>(() => null),
+
   reply: last<Reply | null>(() => null),
 });
 
