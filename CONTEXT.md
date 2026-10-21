@@ -21,7 +21,7 @@ Read-only towards Neon. Sibling repos: `Leader-Backend` (owns Neon data), `ETL_S
 | LLM | Google Gemini via `@langchain/openai` `ChatOpenAI` (baseURL `generativelanguage.googleapis.com/v1beta/openai/`, override `GEMINI_BASE_URL`), temp 0 |
 | Models | `LLM_MODEL_FAST` (default `gemini-flash-lite-latest`), `LLM_MODEL_SMART` (default `gemini-3.5-flash`) |
 | Data source | Neon Postgres via `pg` (pool max 3, READ ONLY tx, `statement_timeout`) |
-| Conversation store | libSQL / SQLite (`@libsql/client`): `data/chat.db` locally, Turso on Vercel |
+| Conversation store | Local: SQLite `data/chat.db`. Vercel: Neon Postgres schema `chatbot` via `CHAT_DATABASE_URL` (adapter in `src/lib/db/sqlite.ts`); Turso also supported |
 | Validation | zod 4 |
 | Deploy | Vercel (Fluid compute, chat route `maxDuration = 300`) |
 
@@ -111,7 +111,7 @@ Debug last run: `sqlite3 data/chat.db "select trace_json from agent_runs order b
 | `NEON_DATABASE_URL` (or `NEON_DIRECT_URL`) | required |
 | `GEMINI_API_KEY` | required |
 | `LLM_MODEL_FAST`, `LLM_MODEL_SMART`, `LLM_MAX_TOKENS` (4000) | optional |
-| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | required on Vercel, else `/tmp/chat.db` (lost) |
+| `CHAT_DATABASE_URL`, `CHAT_DB_SCHEMA` (`chatbot`) | required on Vercel (Neon **direct** URL). Or `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`. Else `/tmp/chat.db` → chats break |
 | `APP_PASSWORD`, `AUTH_SECRET` | required in production. No password: dev = open, prod = everything 401 |
 | `AGENT_MAX_ATTEMPTS` (3), `AGENT_RECURSION_LIMIT` (30) | optional |
 

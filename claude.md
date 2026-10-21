@@ -58,15 +58,15 @@ START → route ─┬─ count answer ("100"/"all"/"yes") ─► deliver → EN
 - Checks: `npm run typecheck`, `npm run build`. No test suite — verify by chatting (UI or `curl -N POST /api/conversations/<id>/chat`).
 
 ## Deploy (Vercel)
-- Import repo as a Next.js project. Env vars: `NEON_DATABASE_URL`, `GEMINI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `APP_PASSWORD`, `AUTH_SECRET`, optional `LLM_MODEL_FAST`, `LLM_MODEL_SMART`, `LLM_MAX_TOKENS`, `AGENT_MAX_ATTEMPTS`, `AGENT_RECURSION_LIMIT`.
-- Vercel's filesystem is not persistent → use Turso (hosted SQLite/libSQL) for conversations. Without it the app falls back to `/tmp/chat.db` and loses history.
+- Import repo as a Next.js project. Env vars: `NEON_DATABASE_URL`, `GEMINI_API_KEY`, `CHAT_DATABASE_URL`, `APP_PASSWORD`, `AUTH_SECRET`, optional `LLM_MODEL_FAST`, `LLM_MODEL_SMART`, `LLM_MAX_TOKENS`, `AGENT_MAX_ATTEMPTS`, `AGENT_RECURSION_LIMIT`.
+- Vercel's filesystem is not persistent → conversations are stored in Neon via `CHAT_DATABASE_URL` (direct/unpooled URL), in their own schema `chatbot` (`CHAT_DB_SCHEMA`). This is the ONLY place the app writes to Neon; `final` stays read-only. Turso also works. With neither, it falls back to `/tmp/chat.db` and chats break ("not found").
 - Chat route has `maxDuration = 300` (needs Fluid compute). A turn takes ~20–60s.
 - Production without `APP_PASSWORD` is locked (all API → 401). This app exposes contact data — never deploy it open.
 
 ## Working conventions
 - Commit messages: conventional style (`feat: ...`, `fix: ...`).
 - Never commit `.env`, `data/`, CSV exports. Never print secret values.
-- Never write to Neon. All Neon access goes through `readOnlyQuery` (READ ONLY tx + timeout) and SQL from the LLM must pass `staticCheck` + `planCheck`.
+- Never write to Neon's `final` schema (only the separate `chatbot` schema for conversations). All data access goes through `readOnlyQuery` (READ ONLY tx + timeout) and SQL from the LLM must pass `staticCheck` + `planCheck`.
 - When a request type gives bad results: look at `agent_runs` trace, then fix `prompts/system_prompt.md` (spellings, synonyms, SQL pattern) before touching code.
 
 # Response style (MANDATORY)
